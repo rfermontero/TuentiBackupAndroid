@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <color name="blanco">#FFFFFF</color>
+    <color name="negro">#000000</color>
+    <color name="textocuadrobusqueda">#212121</color>
+    <color name="textocuadrobusquedalogin">#666666</color>
+
+</resources>
