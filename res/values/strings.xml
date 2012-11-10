@@ -6,13 +6,11 @@
     <string name="email">"Tuenti email: "</string>
     <string name="password">"  Contraseña:"</string>
     <string name="mensajeAyuda">Introduce tu email y tu contraseña de tuenti. Despues pulsa el boton \"Descargar Fotos\"</string>
-    <string name="descargaFotos">Descargar fotos de Tuenti</string>
     <string name="imagen_logo_aplicacion">Imagen logo aplicacion</string>
     <string name="rellena_tu_email_y_tu_contrase_a_y_pulsa_descargar_">Rellena tu email y tu contraseña y pulsa Descargar.</string>
     <string name="contrase_a_">"Contraseña: "</string>
-    <string name="_descargar_">"   Descargar   "</string>
     <string name="_email_">"        Email:"</string>
     <string name="imaenlogotuenti">imaenLogoTuenti</string>
-    <string name="_descargar_fotos_">"  Descargar Fotos  "</string>
+    <string name="_descargar_fotos_">"  Descargar  "</string>
     <string name="imagen_logo">Imagen Logo</string>
 </resources>

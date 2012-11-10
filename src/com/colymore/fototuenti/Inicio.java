@@ -24,7 +24,6 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import org.apache.commons.lang3.StringEscapeUtils;
-import org.apache.http.Header;
 import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.ClientProtocolException;
@@ -41,7 +40,6 @@ import android.annotation.SuppressLint;
 import android.app.ActionBar;
 import android.app.Activity;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
 import android.graphics.BitmapFactory;
@@ -55,6 +53,8 @@ import android.graphics.RectF;
 import android.graphics.drawable.ClipDrawable;
 import android.graphics.drawable.ShapeDrawable;
 import android.graphics.drawable.shapes.RoundRectShape;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
@@ -69,52 +69,70 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.Gallery;
 import android.widget.ImageView;
-import android.widget.ImageView.ScaleType;
 import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.widget.Toast;
+
+import com.colymore.fototuenti.R;
 
 @SuppressWarnings("deprecation")
 public class Inicio extends Activity {
 
-	private Context contexto;
+	private Context				contexto;
 
-	private EditText etEmail;
-	private EditText etPassword;
-	private Button btnDescargar;
-	private Gallery listaHorizontalImagenes;
+	private EditText			etEmail;
+	private EditText			etPassword;
+	private Button				btnDescargar;
+	private Gallery				listaHorizontalImagenes;
+	private TextView			tvProgreso;
 
-	private String email;
-	private String password;
-	private String cookieSesion;
-	private StringBuilder body;
-	private String csrf;
-	private String pid;
-	private String enlaceFotoSiguiente;
-	public ArrayList<String> pathImagenes = new ArrayList<String>();
+	private String				email;
+	private String				password;
+	private String				cookieSesion;
+	private StringBuilder		body;
+	private String				csrf;
+	private String				pid;
+	private String				enlaceFotoSiguiente;
+	public ArrayList<String>	pathImagenes	= new ArrayList<String>();
 
-	private int numeroDeFotos;
-	private ArrayList<Integer> imagenesConError;
+	private int					numeroDeFotos;
+	private int					progresoImagenes;
+	private ArrayList<Integer>	imagenesConError;
+	private ArrayList<Integer>	datos;
 
-	private File directorioFotos = Environment.getExternalStorageDirectory();
+	private File				directorioFotos	= Environment.getExternalStorageDirectory();
 
-	private HttpURLConnection Conexion;
+	private HttpURLConnection	Conexion;
 
-	private List<String> cookies;
-	private List<Cookie> listaCookies;
+	private List<String>		cookies;
+	private List<Cookie>		listaCookies;
+
+	private boolean				descargaActiva	= false;
+
+	public AdaptadorImagenes	adaptador;
+	public OnClickListener		clickDescargar;
 
 	@SuppressLint("NewApi")
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.layout_incio);
-		
-		 if (android.os.Build.VERSION.SDK_INT > android.os.Build.VERSION_CODES.HONEYCOMB_MR2) {
-	            ActionBar actionBar = getActionBar();
-	            actionBar.hide();
 
-	        }
+		if (android.os.Build.VERSION.SDK_INT > android.os.Build.VERSION_CODES.HONEYCOMB_MR2) {
+			ActionBar actionBar = getActionBar();
+			actionBar.hide();
 
+		}
 		contexto = getApplicationContext();
+		datos = new ArrayList<Integer>();
+
+		recojeDatosDeSesion(savedInstanceState);
+		adaptador = new AdaptadorImagenes(contexto);
+
+		if (getLastNonConfigurationInstance() != null) {
+			adaptador = (AdaptadorImagenes) getLastNonConfigurationInstance();
+		}
+
 		// Layout
 		etEmail = (EditText) findViewById(R.id.etEmail);
 
@@ -122,28 +140,101 @@ public class Inicio extends Activity {
 
 		listaHorizontalImagenes = (Gallery) findViewById(R.id.galeria);
 		listaHorizontalImagenes.setGravity(Gravity.LEFT);
+		listaHorizontalImagenes.setAdapter(adaptador);
+		listaHorizontalImagenes.setSelection(0);
+
+		tvProgreso = (TextView) findViewById(R.id.tvProgreso);
 
 		btnDescargar = (Button) findViewById(R.id.btnDescargar);
-		btnDescargar.setOnClickListener(new OnClickListener() {
+
+		clickDescargar = new OnClickListener() {
 
 			@Override
 			public void onClick(View v) {
-				email = etEmail.getText().toString();
-				password = etPassword.getText().toString();
 
-				if (validaDatos(email, password)) {
-					InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-					imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
-					new DescargaFotos().execute();
+				if (!descargaActiva) {
+
+					email = etEmail.getText().toString();
+					password = etPassword.getText().toString();
+
+					if (validaDatos(email, password)) {
+
+						InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+						imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+						new DescargaFotos().execute();
+						descargaActiva = true;
+						Toast.makeText(contexto, "Comienza la descarga.", Toast.LENGTH_SHORT).show();
+						tvProgreso.setText("Descargando fotos..");
+
+					}
+
+				} else {
+					Toast.makeText(contexto, "Descarga en proceso", Toast.LENGTH_LONG).show();
 				}
 			}
-		});
+		};
+
+		if (descargaActiva)
+			btnDescargar.setOnClickListener(null);
+		else
+			btnDescargar.setOnClickListener(clickDescargar);
 
 	}
 
 	@Override
-	public void onConfigurationChanged(Configuration config) {
-		super.onConfigurationChanged(config);
+	public void onSaveInstanceState(Bundle savedInstanceState) {
+		super.onSaveInstanceState(savedInstanceState);
+
+		// Guardo el estado de la tarea asyncrona
+
+		savedInstanceState.putString("Email", email);
+		savedInstanceState.putString("Password", password);
+		savedInstanceState.putBoolean("descargaActiva", descargaActiva);
+		savedInstanceState.putStringArrayList("pathImagenes", pathImagenes);
+		savedInstanceState.putInt("progresoImagen", progresoImagenes);
+		savedInstanceState.putIntegerArrayList("datos", datos);
+		savedInstanceState.putString("textoProgreso", tvProgreso.getText().toString());
+
+	}
+
+	@Override
+	public Object onRetainNonConfigurationInstance() {
+
+		return adaptador;
+	}
+
+	private void recojeDatosDeSesion(Bundle savedInstanceState) {
+
+		try {
+			email = savedInstanceState.getString("Email");
+		} catch (NullPointerException e) {
+			e.printStackTrace();
+		}
+		try {
+			password = savedInstanceState.getString("password");
+		} catch (NullPointerException e) {
+			e.printStackTrace();
+		}
+		try {
+			descargaActiva = savedInstanceState.getBoolean("descargaActiva");
+		} catch (NullPointerException e) {
+			e.printStackTrace();
+		}
+		try {
+			pathImagenes = savedInstanceState.getStringArrayList("pathImagenes");
+		} catch (NullPointerException e) {
+			e.printStackTrace();
+		}
+		try {
+			progresoImagenes = savedInstanceState.getInt("progresoImagen");
+		} catch (NullPointerException e) {
+			e.printStackTrace();
+		}
+		try {
+			datos = savedInstanceState.getIntegerArrayList("datos");
+		} catch (NullPointerException e) {
+			e.printStackTrace();
+		}
 
 	}
 
@@ -156,17 +247,15 @@ public class Inicio extends Activity {
 	 *            Password.
 	 * @return True si correcto False si no,
 	 */
+	@SuppressWarnings("null")
 	private Boolean validaDatos(String email, String password) {
 
-		if (email == null && email.isEmpty() || password == null
-				|| password.isEmpty()) {
+		if (email == null && email.isEmpty() || password == null || password.isEmpty()) {
 			return false;
 		}
 		return true;
 
 	}
-
-	/****** Metodos Secundarios ****/
 
 	/**
 	 * Metodo para recibir por get una url
@@ -186,8 +275,7 @@ public class Inicio extends Activity {
 			Conexion.setUseCaches(false);
 			Conexion.setDefaultUseCaches(false);
 			Conexion.setRequestProperty("Accept", "*/*");
-			Conexion.setRequestProperty(
-					"User-agent",
+			Conexion.setRequestProperty("User-agent",
 					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.7; rv:12.0) Gecko/20100101 Firefox/12.0");
 			InputStream in = Conexion.getInputStream();
 			String encoding = Conexion.getContentEncoding();
@@ -223,8 +311,7 @@ public class Inicio extends Activity {
 			Conexion.setUseCaches(false);
 			Conexion.setDefaultUseCaches(false);
 			Conexion.setRequestProperty("Accept", "*/*");
-			Conexion.setRequestProperty(
-					"User-agent",
+			Conexion.setRequestProperty("User-agent",
 					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.7; rv:12.0) Gecko/20100101 Firefox/12.0");
 			Conexion.setRequestProperty("Cookie", cookie);
 			InputStream in = Conexion.getInputStream();
@@ -256,19 +343,16 @@ public class Inicio extends Activity {
 	private Boolean postWeb(URL url, String cookie, List<NameValuePair> postData) {
 
 		HttpClient httpclient = new DefaultHttpClient();
-		HttpPost httppost = new HttpPost(
-				"http://m.tuenti.com/?m=Login&f=process_login");
+		HttpPost httppost = new HttpPost("http://m.tuenti.com/?m=Login&f=process_login");
 		httppost.addHeader("Cookie", cookie);
-		httppost.addHeader(
-				"User-agent",
-				"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.7; rv:12.0) Gecko/20100101 Firefox/12.0");
-		Log.i("Cookie enviada en get del login ", cookie);
+		httppost.addHeader("User-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.7; rv:12.0) Gecko/20100101 Firefox/12.0");
+		if (cookie != null)
+			Log.i("Cookie enviada en get del login ", cookie);
 		try {
 
 			httppost.setEntity(new UrlEncodedFormEntity(postData));
 			HttpResponse response = httpclient.execute(httppost);
-			Reader reader = new InputStreamReader(response.getEntity()
-					.getContent());
+			Reader reader = new InputStreamReader(response.getEntity().getContent());
 			StringBuffer sb = new StringBuffer();
 			{
 				int read;
@@ -277,8 +361,7 @@ public class Inicio extends Activity {
 					sb.append(cbuf, 0, read);
 			}
 
-			CookieStore cookieStore = ((AbstractHttpClient) httpclient)
-					.getCookieStore();
+			CookieStore cookieStore = ((AbstractHttpClient) httpclient).getCookieStore();
 
 			listaCookies = cookieStore.getCookies();
 
@@ -307,18 +390,18 @@ public class Inicio extends Activity {
 
 					switch (i) {
 
-					case 0:
-						tuentiemail = cookieEnLista.getValue();
-						break;
-					case 1:
-						mid = cookieEnLista.getValue();
-						break;
-					case 2:
-						lang = cookieEnLista.getValue();
-						break;
-					default:
+						case 0:
+							tuentiemail = cookieEnLista.getValue();
+							break;
+						case 1:
+							mid = cookieEnLista.getValue();
+							break;
+						case 2:
+							lang = cookieEnLista.getValue();
+							break;
+						default:
 
-						break;
+							break;
 					}
 
 				} catch (Exception e) {
@@ -327,8 +410,8 @@ public class Inicio extends Activity {
 
 			}
 
-			com.colymore.fototuenti.Cookie galleta = new com.colymore.fototuenti.Cookie(
-					pid, tuentiemail, expires, path, domain, mid, lang);
+			com.colymore.fototuenti.Cookie galleta = new com.colymore.fototuenti.Cookie(pid, tuentiemail, expires, path, domain,
+					mid, lang);
 			cookieSesion = galleta.getCookie();
 
 			Log.i("Cookie de sesion ", cookieSesion);
@@ -355,16 +438,14 @@ public class Inicio extends Activity {
 		try {
 
 			// Hago un get al Bitmap y genero un byte[]
-			Bitmap bitmap = BitmapFactory.decodeStream((InputStream) url
-					.getContent());
+			Bitmap bitmap = BitmapFactory.decodeStream((InputStream) url.getContent());
 			ByteArrayOutputStream bytes = new ByteArrayOutputStream();
 
 			// Comprimo en PNG
 			bitmap.compress(Bitmap.CompressFormat.JPEG, 100, bytes);
 
 			// Genero el fichero, un FOS y escribo en el el byte[] y cierro
-			ficheroImagen = new File(directorioFotos + "/FotosTuenti/" + email
-					+ "/" + i + ".jpg");
+			ficheroImagen = new File(directorioFotos + "/FotosTuenti/" + email + "/" + i + ".jpg");
 			ficheroImagen.createNewFile();
 			FileOutputStream fo = new FileOutputStream(ficheroImagen);
 			fo.write(bytes.toByteArray());
@@ -391,47 +472,16 @@ public class Inicio extends Activity {
 	 *            String final de la busqueda
 	 * @return String final con la cadena
 	 */
-	private String getCadenaEnString(String totalCadena, String inicioCadena,
-			String finalCadena) {
+	private String getCadenaEnString(String totalCadena, String inicioCadena, String finalCadena) {
 
 		int posInicio = totalCadena.indexOf(inicioCadena);
 		if (posInicio == -1)
 			return "";
-		int posFinal = totalCadena.indexOf(finalCadena, posInicio
-				+ inicioCadena.length());
+		int posFinal = totalCadena.indexOf(finalCadena, posInicio + inicioCadena.length());
 		totalCadena.substring(posFinal);
-		String cadenaEncontrada = totalCadena.substring(posInicio
-				+ inicioCadena.length(), posFinal);
+		String cadenaEncontrada = totalCadena.substring(posInicio + inicioCadena.length(), posFinal);
 		return cadenaEncontrada;
 
-	}
-
-	/**
-	 * Metodo para generar un string a partir de un list<String>
-	 * 
-	 * @param listaString
-	 *            Lista que contiene los strings
-	 * @param caracter
-	 *            String que separa cada elemento
-	 * @return String que contiene los elementos separados por el caracter
-	 */
-	public static String implodeLista(List<Header> listaString, String caracter) {
-
-		String salida = "";
-
-		if (listaString.size() > 0) {
-			StringBuilder sb = new StringBuilder();
-			sb.append(listaString.get(0));
-
-			for (int i = 1; i < listaString.size(); i++) {
-				sb.append(caracter);
-				sb.append(listaString.get(i));
-			}
-
-			salida = sb.toString();
-		}
-
-		return salida;
 	}
 
 	/**
@@ -441,10 +491,9 @@ public class Inicio extends Activity {
 	 *            que queremos limpiar
 	 * @return String url limpia
 	 */
-	public String eliminarAmpDeUrL(String url) {
+	private String eliminarAmpDeUrL(String url) {
 
-		url = StringEscapeUtils.unescapeHtml4(url).replaceAll("[^\\x20-\\x7e]",
-				"");
+		url = StringEscapeUtils.unescapeHtml4(url).replaceAll("[^\\x20-\\x7e]", "");
 
 		return url;
 	}
@@ -458,8 +507,7 @@ public class Inicio extends Activity {
 	 * @return body StringBuilder que contiene el body
 	 * @throws IOException
 	 */
-	public static StringBuilder inputStreamaBody(InputStream is)
-			throws IOException {
+	private static StringBuilder inputStreamaBody(InputStream is) throws IOException {
 
 		StringBuilder body = new StringBuilder();
 		byte[] buffer = new byte[2048];
@@ -473,14 +521,39 @@ public class Inicio extends Activity {
 	}
 
 	/**
-	 * Metodo para generar un zip de un directorio
+	 * Metodo para comprobar si existe conexion a internet
 	 * 
-	 * @param directory
+	 * @param Context
+	 *            contexto
+	 * @return true o false
+	 */
+
+	public static boolean checkConn(Context contexto) {
+		ConnectivityManager conMgr = (ConnectivityManager) contexto.getSystemService(Context.CONNECTIVITY_SERVICE);
+
+		if (conMgr.getNetworkInfo(0).getState() == NetworkInfo.State.CONNECTED
+				|| conMgr.getNetworkInfo(1).getState() == NetworkInfo.State.CONNECTING) {
+			return true;
+
+		} else if (conMgr.getNetworkInfo(0).getState() == NetworkInfo.State.DISCONNECTED
+				|| conMgr.getNetworkInfo(1).getState() == NetworkInfo.State.DISCONNECTED) {
+			return false;
+
+		}
+
+		return false;
+	}
+
+	/**
+	 * Metodo para generar un zip de un directorio Se usara en la V2
+	 * 
+	 * @param directorio
+	 *            path del directorio
 	 * @param zipfile
+	 *            archivo zip
 	 * @throws IOException
 	 */
-	public static void generaZip(File directorio, File zipfile)
-			throws IOException {
+	private static void generaZip(File directorio, File zipfile) throws IOException {
 		URI base = directorio.toURI();
 		Deque<File> queue = new LinkedList<File>();
 		queue.push(directorio);
@@ -509,8 +582,7 @@ public class Inicio extends Activity {
 		}
 	}
 
-	private static void copy(InputStream in, OutputStream out)
-			throws IOException {
+	private static void copy(InputStream in, OutputStream out) throws IOException {
 		byte[] buffer = new byte[1024];
 		while (true) {
 			int readCount = in.read(buffer);
@@ -534,25 +606,12 @@ public class Inicio extends Activity {
 
 	private class DescargaFotos extends AsyncTask<Void, Integer, Integer> {
 
-		ProgressBar pb = (ProgressBar) findViewById(R.id.barraprogreso);
-		AdaptadorImagenes adaptador = new AdaptadorImagenes(contexto);
-		boolean correcto = true;
+		boolean	correcto	= true;
 
 		@Override
 		protected void onPreExecute() {
 
-			listaHorizontalImagenes.setAdapter(adaptador);
-			listaHorizontalImagenes.setSelection(0);
 			btnDescargar.setOnClickListener(null);
-			final float[] roundedCorners = new float[] { 2, 2, 2, 2, 2, 2, 2, 2 };
-			ShapeDrawable pgDrawable = new ShapeDrawable(new RoundRectShape(
-					roundedCorners, null, null));
-			String colorAzul = "#0099CC";
-			pgDrawable.getPaint().setColor(Color.parseColor(colorAzul));
-			ClipDrawable progresoD = new ClipDrawable(pgDrawable, Gravity.LEFT,
-					ClipDrawable.HORIZONTAL);
-			pb.setProgressDrawable(progresoD);
-			
 			imagenesConError = new ArrayList<Integer>();
 
 		}
@@ -576,12 +635,15 @@ public class Inicio extends Activity {
 				String cadenaInicioBusqueda = "name=\"csrf\" value=\"";
 				String cadenaFinalBusqueda = "\"/>";
 
-				csrf = getCadenaEnString(body.toString(), cadenaInicioBusqueda,
-						cadenaFinalBusqueda);
+				csrf = getCadenaEnString(body.toString(), cadenaInicioBusqueda, cadenaFinalBusqueda);
 
 			} catch (MalformedURLException e) {
 				Log.e("Url Mal formada", e.getMessage());
+				correcto = false;
 				e.printStackTrace();
+			} catch (NullPointerException e) {
+				Log.e("Error", "Null");
+				correcto = false;
 			}
 
 			// Me logueo
@@ -592,24 +654,25 @@ public class Inicio extends Activity {
 			postArgs.add(new BasicNameValuePair("remember", "1"));
 
 			try {
-				postWeb(new URL("http://m.tuenti.com/?m=Login&f=process_login"),
-						cookieSesion, postArgs);
+				postWeb(new URL("http://m.tuenti.com/?m=Login&f=process_login"), cookieSesion, postArgs);
 
 			} catch (MalformedURLException e) {
 				Log.e("Url Mal formada", e.getMessage());
 				e.printStackTrace();
+				correcto = false;
+			} catch (NullPointerException e) {
+				Log.e("Error", "null");
+				correcto = false;
 			}
 
 			// Voy al perfil
 			try {
 				// Busco el link de las fotos
-				getWeb(new URL("http://m.tuenti.com/?m=Profile&func=my_profile"),
-						cookieSesion);
+				getWeb(new URL("http://m.tuenti.com/?m=Profile&func=my_profile"), cookieSesion);
 				String cadenaInicioBusqueda = "<div class=\"h\">Fotos</div><a id=\"photos\"></a><div class=\"item\"><div> <small> <a href=\"";
 				String cadenaFinalBusqueda = "\">";
 				String urlAlbum = "http://m.tuenti.com/"
-						+ getCadenaEnString(body.toString(),
-								cadenaInicioBusqueda, cadenaFinalBusqueda);
+						+ getCadenaEnString(body.toString(), cadenaInicioBusqueda, cadenaFinalBusqueda);
 
 				if (urlAlbum.equals("http://m.tuenti.com/")) {
 					try {
@@ -630,37 +693,27 @@ public class Inicio extends Activity {
 					String primeraFoto = null;
 
 					primeraFoto = eliminarAmpDeUrL("http://m.tuenti.com/"
-							+ getCadenaEnString(body.toString(),
-									cadenaInicioBusqueda, cadenaFinalBusqueda));
+							+ getCadenaEnString(body.toString(), cadenaInicioBusqueda, cadenaFinalBusqueda));
 
-					// Recogo el contenido del album, numero de fotos, enlace de
-					// foto 2
-					// y sucesivas
+					// Recojo el contenido del album, numero de fotos, enlace de
+					// foto 2 y sucesivas
 					getWeb(new URL(primeraFoto), cookieSesion);
-					numeroDeFotos = Integer.valueOf(getCadenaEnString(
-							body.toString(), "1 de ", ")"));
+					numeroDeFotos = Integer.valueOf(getCadenaEnString(body.toString(), "1 de ", ")"));
 
-					pb.setMax(numeroDeFotos);
 					cadenaInicioBusqueda = ") <a href=\"";
 					cadenaFinalBusqueda = "\">Siguiente";
 
 					enlaceFotoSiguiente = eliminarAmpDeUrL("http://m.tuenti.com/"
-							+ getCadenaEnString(body.toString(),
-									cadenaInicioBusqueda, cadenaFinalBusqueda));
+							+ getCadenaEnString(body.toString(), cadenaInicioBusqueda, cadenaFinalBusqueda));
 
 					// Creo el directorio en el que se guardaran las fotos
-					if (new File(directorioFotos + "/FotosTuenti/" + email)
-							.exists()) {
+					if (new File(directorioFotos + "/FotosTuenti/" + email).exists()) {
 						Log.e("Ficheros", "Directorio existente");
 					} else {
-						if (!new File(directorioFotos.toString()
-								+ "/FotosTuenti/" + email).mkdirs()) {
-
-							Log.e("Error Ficheros",
-									"Error creando directorio o ya existe");
+						if (!new File(directorioFotos.toString() + "/FotosTuenti/" + email).mkdirs()) {
+							Log.e("Error Ficheros", "Error creando directorio o ya existe");
 
 						} else {
-
 							Log.i("Ficheros", "Directorio creado");
 						}
 					}
@@ -672,18 +725,15 @@ public class Inicio extends Activity {
 					cadenaFinalBusqueda = "\"";
 					String jpgPrimeraFoto = null;
 
-					jpgPrimeraFoto = eliminarAmpDeUrL(getCadenaEnString(
-							body.toString(), cadenaInicioBusqueda,
+					jpgPrimeraFoto = eliminarAmpDeUrL(getCadenaEnString(body.toString(), cadenaInicioBusqueda,
 							cadenaFinalBusqueda));
 
 					pathImagen = getImagen(new URL(jpgPrimeraFoto), 1);
 					pathImagenes.add(pathImagen);
 					Log.i("Descargada imagen", "1");
-
+					progresoImagenes = 1;
 					// En el progressupdate lo actualizo
-
-					publishProgress(0);
-
+					publishProgress(1);
 					// Primera imagen descargada, descargo el resto
 
 					for (int i = 2; i <= numeroDeFotos; i++) {
@@ -693,13 +743,10 @@ public class Inicio extends Activity {
 						cadenaFinalBusqueda = "\">Siguiente";
 
 						try {
-							enlaceFotoSiguiente = eliminarAmpDeUrL(URLDecoder
-									.decode("http://m.tuenti.com/"
-											+ getCadenaEnString(
-													body.toString(),
-													cadenaInicioBusqueda,
-													cadenaFinalBusqueda),
-											"UTF-8"));
+							enlaceFotoSiguiente = eliminarAmpDeUrL(URLDecoder.decode(
+									"http://m.tuenti.com/"
+											+ getCadenaEnString(body.toString(), cadenaInicioBusqueda, cadenaFinalBusqueda),
+									"UTF-8"));
 						} catch (UnsupportedEncodingException e) {
 							Log.e("Error", e.getMessage());
 							e.printStackTrace();
@@ -709,10 +756,8 @@ public class Inicio extends Activity {
 						cadenaFinalBusqueda = "\"";
 						String jpgFotoSiguiente = null;
 						try {
-							jpgFotoSiguiente = eliminarAmpDeUrL(URLDecoder
-									.decode(getCadenaEnString(body.toString(),
-											cadenaInicioBusqueda,
-											cadenaFinalBusqueda), "UTF-8"));
+							jpgFotoSiguiente = eliminarAmpDeUrL(URLDecoder.decode(
+									getCadenaEnString(body.toString(), cadenaInicioBusqueda, cadenaFinalBusqueda), "UTF-8"));
 						} catch (UnsupportedEncodingException e) {
 							Log.e("Error", e.getMessage());
 							e.printStackTrace();
@@ -731,17 +776,35 @@ public class Inicio extends Activity {
 			} catch (MalformedURLException e) {
 				Log.e("Error", e.getMessage());
 				e.printStackTrace();
+				correcto = false;
+			} catch (NullPointerException e) {
+				Log.e("Error", "null");
+				e.printStackTrace();
+				correcto = false;
 			}
 
-			return 0;
+			return numeroDeFotos;
 		}
 
 		@Override
 		protected void onProgressUpdate(Integer... progreso) {
 
 			// Actualizo el progreso
-			pb.setProgress(progreso[0]);
+			progresoImagenes = progreso[0];
+			if (progresoImagenes == 1) {
+				Toast.makeText(contexto,
+						"Las fotografias se descargaran en una carpeta llamada FotosTuenti dentro de tu tarjeta de memoria.",
+						Toast.LENGTH_LONG).show();
+			}
+			actualizaTexto(progreso[0]);
 			adaptador.addItem(progreso[0]);
+
+		}
+
+		private void actualizaTexto(Integer progreso) {
+
+			tvProgreso = (TextView) findViewById(R.id.tvProgreso);
+			tvProgreso.setText(progreso.toString() + " de " + numeroDeFotos + " fotos.");
 
 		}
 
@@ -749,41 +812,52 @@ public class Inicio extends Activity {
 		protected void onPostExecute(Integer numero) {
 
 			if (!correcto) {
-				Toast.makeText(contexto,
-						"Error: Comprueba tu usuario y contraseña",
-						Toast.LENGTH_LONG).show();
+				if (checkConn(contexto)) {
+					Toast.makeText(contexto, "Error: Comprueba tu usuario y contraseña", Toast.LENGTH_LONG).show();
+				} else {
+					Toast.makeText(contexto, "Se ha producido un error, comprueba tu conexion a internet.", Toast.LENGTH_LONG)
+							.show();
+				}
+				tvProgreso.setText("Error.");
 			} else {
+				/* Limpiamos edittext y los hacemos clickeables */
+				etEmail.setText("");
+				etPassword.setText("");
 
 				if (imagenesConError.size() != 0) {
 					Toast.makeText(
 							contexto,
-							"Descarga completada con"
-									+ String.valueOf(imagenesConError.size())
+							"Descarga completada con" + String.valueOf(imagenesConError.size())
 									+ " errores. podras encontrar tus fotos en /FotosTuenti/" + email, Toast.LENGTH_LONG).show();
 				} else {
 					Toast.makeText(contexto, "Descarga completada, podras encontrar tus fotos en /FotosTuenti/" + email,
 							Toast.LENGTH_LONG).show();
 				}
 
-				//V2
-				/*AlertDialog.Builder builder = new AlertDialog.Builder(contexto);
-				builder.setTitle("DropBox");
-				builder.setMessage("¿Deseas generar un zip y almacenarlo en dropbox?");
-				builder.setPositiveButton("SI", null);
-				builder.setNegativeButton("NO", null);
-				builder.show();*/
 			}
+
+			descargaActiva = false;
+			btnDescargar.setOnClickListener(clickDescargar);
+		}
+
+		@Override
+		protected void onCancelled() {
+			Toast.makeText(contexto, "Error: Comprueba tu usuario y contraseña", Toast.LENGTH_LONG).show();
+			tvProgreso.setText("Error");
+			btnDescargar.setOnClickListener(clickDescargar);
+			descargaActiva = false;
+
 		}
 	}
 
 	private class AdaptadorImagenes extends BaseAdapter {
 
-		private Context contexto = null;
-		private ArrayList<Integer> datos = new ArrayList<Integer>();
+		private Context	contexto	= null;
 
 		public AdaptadorImagenes(Context contexto) {
 
 			this.contexto = contexto;
+
 		}
 
 		public void addItem(Integer posicion) {
@@ -810,10 +884,15 @@ public class Inicio extends Activity {
 		@Override
 		public View getView(int position, View convertView, ViewGroup parent) {
 
-			ImageView imagen = new ImageView(contexto);
-			imagen.setImageBitmap(getBitMapRedimensionado(position));
-			imagen.setScaleType(ScaleType.FIT_XY);
-			return imagen;
+			if (!(convertView instanceof ImageView)) {
+				ImageView cv = new ImageView(contexto);
+				cv.setLayoutParams(new Gallery.LayoutParams(210, 210));
+				cv.setScaleType(ImageView.ScaleType.FIT_XY);
+				cv.setImageBitmap(getBitMapRedimensionado(position));
+				convertView = cv;
+			}
+
+			return convertView;
 
 		}
 
@@ -827,10 +906,8 @@ public class Inicio extends Activity {
 		private Bitmap getBitMapRedimensionado(int posicion) {
 
 			File fichero = new File(pathImagenes.get(posicion));
-			Bitmap bmOriginal = redondeaEsquinasBitmap(Bitmap
-					.createScaledBitmap(
-							BitmapFactory.decodeFile(fichero.toString()), 210,
-							210, true));
+			Bitmap bmOriginal = redondeaEsquinasBitmap(Bitmap.createScaledBitmap(BitmapFactory.decodeFile(fichero.toString()),
+					210, 210, true));
 
 			return bmOriginal;
 		}
@@ -843,14 +920,12 @@ public class Inicio extends Activity {
 		 * @return bitmap redondeado
 		 */
 		public Bitmap redondeaEsquinasBitmap(Bitmap bitmap) {
-			Bitmap salida = Bitmap.createBitmap(bitmap.getWidth(),
-					bitmap.getHeight(), Config.ARGB_8888);
+			Bitmap salida = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Config.ARGB_8888);
 			Canvas canvas = new Canvas(salida);
 
 			final int color = 0xff424242;
 			final Paint paint = new Paint();
-			final Rect rect = new Rect(0, 0, bitmap.getWidth(),
-					bitmap.getHeight());
+			final Rect rect = new Rect(0, 0, bitmap.getWidth(), bitmap.getHeight());
 			final RectF rectF = new RectF(rect);
 			final float roundPx = 12;
 

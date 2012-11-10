@@ -1,5 +1,7 @@
 package com.colymore.fototuenti;
 
+import com.colymore.fototuenti.R;
+
 public class Cookie {
 
 	private String cookiename;

@@ -3,6 +3,7 @@ TuentiBackupAndroid
 Port android del sistema de backups de fotos para tuenti hecho en Java(https://github.com/colymore/TuentiBackup), que a su vez es un port de PHP de @Outime
 https://github.com/outime/TuentiPhotoBackup
 
+v2.0 Mejoras en rotación de pantalla.
 v1.0 Version inicial: Funcionalidad basica.
 
 Software para descargar todas las fotos de la red social tuenti.
